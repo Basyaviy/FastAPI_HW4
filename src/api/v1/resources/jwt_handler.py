@@ -17,37 +17,37 @@ def token_response(token: str):
     return token
 
 
-# Sing the JWT payload
-def signJWT(user: UserSchema):
+# Эти два метода для формирования payload которые будут добавлены в JWT токены
+# отличаются количеством передаваемых атрибутов и сроком протухания
+def get_access_token(user: UserSchema):
     payload = {
         "username": user.username,
-        "password": user.password,
-        "expiry": time.time() + 600,
-        "roles": [],
+        "roles": user.roles,
+        "created_at": user.created_at,
+        "is_superuser": user.is_superuser,
+        "uuid": user.uuid,
+        "is_totp_enabled": user.is_totp_enabled,
+        "is_active": user.is_active,
         "email": user.email,
+        "expiry": time.time() + 300,
     }
-    # сохраняю токен в фейковую БД
-    user.access_token = get_new_token(payload)
-    user.refresh_token = get_new_token(payload)
-    return user
+    return signJWT(payload)
 
 
-def generate_payload(user):
+def get_refresh_token(user: UserSchema):
     payload = {
-        "username": user["username"],
-        "password": user["password"],
+        "uuid": user.uuid,
         "expiry": time.time() + 600,
-        "roles": [],
-        "email": user["email"],
     }
-    return payload
+    return signJWT(payload)
 
 
-def get_new_token(user):
-    return jwt.encode(generate_payload(user), JWT_SECRET, algorithm=JWT_ALGORITHM)
+# Sign the JWT payload
+def signJWT(payload):
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-# base64 binary data
+# расшифровать JWT токен из base64 чтобы проверить дату протухания
 def decodeJWT(token: str):
     try:
         decode_token = jwt.decode(token, JWT_SECRET, algorithms=JWT_ALGORITHM)

@@ -2,15 +2,13 @@ from urllib.request import Request
 
 import redis
 import uvicorn
-from fastapi import FastAPI, Body, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import FastAPI
 
-from src.api.v1.resources import posts
+from src.api.v1.resources import posts, auth
 from src.core import config
 from src.db import cache, redis_cache
 
-from src.api.v1.schemas.auth import UserSchema
-from src.api.v1.resources.jwt_handler import signJWT
+
 
 
 app = FastAPI(
@@ -24,8 +22,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# фейковая база данных зарегистрированных пользователей
-users = []
+
 
 @app.get("/")
 def root():
@@ -50,58 +47,8 @@ def shutdown():
 
 # Подключаем роутеры к серверу
 app.include_router(router=posts.router, prefix="/api/v1/posts")
+app.include_router(router=auth.router, prefix="/api/v1")
 
-
-# регистрация пользователя
-@app.post("/api/v1/signup", tags=["user"], status_code=201)
-def user_signup(user: UserSchema = Body(default=None)):
-    users.append(user)
-    return signJWT(user)
-
-
-# проверка на наличие такого пользователя в БД
-def get_user(data: UserSchema):
-    for user in users:
-        if user.username == data.username and user.password == data.password:
-            return user
-    return None
-
-
-@app.post("/api/v1/login", tags=["user"])
-def user_signup(user: UserSchema = Body(default=None)):
-    persisted_user = get_user(user)
-    if persisted_user is not None:
-        # пользователь найден, возвращаю сохранённые данные + его access_token
-        return persisted_user
-    else:
-        return {
-            "error": "Логин или пароль не правильные"
-        }
-
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    user = fake_decode_token(token)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return user
-
-
-def fake_decode_token(token):
-    for user in users:
-        if user.refresh_token == token:
-            return user
-    return None
-
-
-@app.get("/api/v1/users/me")
-async def read_users_me(current_user: UserSchema = Depends(get_current_user)):
-    return current_user
 
 
 if __name__ == "__main__":
