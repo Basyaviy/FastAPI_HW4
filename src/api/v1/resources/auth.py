@@ -3,7 +3,8 @@ import uuid
 
 from fastapi_jwt_auth import AuthJWT
 
-from src.api.v1.resources.jwt_handler import get_access_token, get_refresh_token
+from src.api.v1.resources.jwt_bearer import JWTBearer
+from src.api.v1.resources.jwt_handler import generate_access_token, generate_refresh_token, get_uuid_from_token
 from src.api.v1.schemas.auth import UserSchema, UserLoginSchema, UserSignupSchema
 from fastapi import Body, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -23,8 +24,7 @@ def user_signup(user: UserSignupSchema = Body(default=None)):
     response_user = create_user(user)
 
     # возвращаем пользователю данные об успешной регистрации
-    # на данном этам токен не генерируется
-    # return signJWT(user)
+    # на данном этапе токен не генерируется
     result = {
         "msg" : "User created.",
         "user": response_user
@@ -39,7 +39,6 @@ def create_user(user: UserSignupSchema):
     # дополнение записей о пользователе
     persisted_user = UserSchema()
     persisted_user.username = user.username
-    # TODO TypeError: Object of type datetime is not JSON serializable
     persisted_user.created_at = datetime.now().timestamp()
     persisted_user.email = user.email
     persisted_user.password = encode_password(user.password)
@@ -69,9 +68,15 @@ def get_user(user: UserSchema):
     return None
 
 
+def find_user_in_DB(uuid):
+    for persisted_user in users:
+        if persisted_user.uuid == uuid:
+            return persisted_user
+
+
 def generate_response_with_tokens(persisted_user: UserLoginSchema):
-    access_token = get_access_token(persisted_user)
-    refresh_token = get_refresh_token(persisted_user)
+    access_token = generate_access_token(persisted_user)
+    refresh_token = generate_refresh_token(persisted_user)
     result = {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -93,15 +98,45 @@ def user_signup(user: UserLoginSchema = Body(default=None), Authorize: AuthJWT =
         }
 
 
-@router.post('/refresh', tags=["user"])
-def refresh(Authorize: AuthJWT = Depends()):
-    Authorize.jwt_refresh_token_required()
-    current_user = Authorize.get_jwt_subject()
-    new_access_token = Authorize.create_access_token(subject=current_user)
-    return {"access_token": new_access_token}
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# Example protected Endpoint
-@router.get('/hello')
-def refresh(Authorize: AuthJWT = Depends()):
-    Authorize.jwt_required()
-    return {"hello": "world"}
+
+@router.post('/refresh', tags=["user"])
+async def read_items(token: str = Depends(oauth2_scheme)):
+    # декодировать токен и получить uuid пользователя
+    uuid = get_uuid_from_token(token)
+    persisted_user = find_user_in_DB(uuid)
+    # обновить expiry датой для refresh_token
+    refresh_token = generate_refresh_token(persisted_user)
+    # обновить expiry датой для access_token
+    access_token = generate_access_token(persisted_user)
+    # вернуть новый токен
+    return {"refresh_token": refresh_token, "access_token": access_token}
+
+
+@router.get('/users/me', dependencies=[Depends(JWTBearer())], tags=["user"])
+def about_me(token: str = Depends(oauth2_scheme)):
+    # декодировать токен и получить uuid пользователя
+    uuid = get_uuid_from_token(token)
+    persisted_user = find_user_in_DB(uuid)
+    if persisted_user is not None:
+        # пользователь найден, формирую payload для access_token и refresh_token,
+        # подписываю их и возвращаю пользователю
+        return persisted_user
+
+
+@router.patch('/users/me', dependencies=[Depends(JWTBearer())], tags=["user"])
+def about_me(user: UserLoginSchema = Body(default=None), token: str = Depends(oauth2_scheme)):
+    # декодировать токен и получить uuid пользователя
+    uuid = get_uuid_from_token(token)
+    persisted_user = find_user_in_DB(uuid)
+    # Изменить данные на те что пришли в теле запроса
+    persisted_user.username = user.username
+    persisted_user.email = user.email
+    # переподписать токены
+    access_token = generate_access_token(persisted_user)
+
+    if persisted_user is not None:
+        # пользователь найден, формирую payload для access_token и refresh_token,
+        # подписываю их и возвращаю пользователю
+        return persisted_user
