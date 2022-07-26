@@ -5,7 +5,6 @@ import uvicorn
 from fastapi import FastAPI
 
 from src.api.v1.resources import posts, auth
-from src.api.v1.schemas import auth2
 from src.core import config
 from src.db import cache, redis_cache
 
